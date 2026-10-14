@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tableside: Restaurant & Billing</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#EDF0F3;--card:#fff;--ink:#14213D;--mut:#5D6B82;--acc:#F2A900;--accink:#14213D;--ok:#2E7D5B;--bad:#C0442B;--line:#D5DBE3;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0E1626;--card:#16223A;--ink:#EAF0FA;--mut:#93A1BA;--line:#27365A;--ok:#4DB88A;--bad:#E8795F}}
+:root[data-theme="dark"]{--bg:#0E1626;--card:#16223A;--ink:#EAF0FA;--mut:#93A1BA;--line:#27365A;--ok:#4DB88A;--bad:#E8795F}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'Bricolage Grotesque',system-ui,-apple-system,Segoe UI,sans-serif;padding-bottom:calc(76px + env(safe-area-inset-bottom,0px))}
+main{max-width:640px;margin:0 auto;padding:14px}
+h1{font-size:26px;font-weight:800;margin:4px 0 2px;letter-spacing:-.5px}
+h2{font-size:18px;font-weight:600;margin:18px 0 8px}
+.sub{color:var(--mut);font-size:14px;margin:0 0 12px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+.tbl{text-align:left;font:inherit;color:inherit;cursor:pointer;min-height:92px;border-left:6px solid var(--line)}
+.tbl b{font-size:22px}
+.tbl.ordering{border-left-color:var(--acc)}.tbl.kitchen{border-left-color:var(--bad)}.tbl.ready{border-left-color:var(--ok)}.tbl.eating{border-left-color:var(--mut)}
+.tag{font-size:13px;color:var(--mut)}
+.row{display:flex;align-items:center;gap:8px;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.row .nm{flex:1;min-width:0}
+button{font:inherit;cursor:pointer}
+.btn{background:var(--acc);color:var(--accink);border:0;border-radius:10px;padding:11px 16px;font-weight:600;min-height:44px}
+.btn.alt{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.btn.full{width:100%;margin-top:10px}
+.btn:disabled{opacity:.4}
+.q{display:flex;align-items:center;gap:6px}
+.q button{width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:18px}
+.chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px}
+.chip{flex:none;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:20px;padding:8px 14px}
+.chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.tot{display:flex;justify-content:space-between;padding:4px 0;color:var(--mut)}
+.tot.big{color:var(--ink);font-size:24px;font-weight:800;border-top:2px solid var(--ink);margin-top:6px;padding-top:10px}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+nav button{flex:1;border:0;background:none;color:var(--mut);padding:14px 4px;font-weight:600;position:relative}
+nav button.on{color:var(--ink);box-shadow:inset 0 3px 0 var(--acc)}
+.badge{background:var(--bad);color:#fff;border-radius:10px;font-size:11px;padding:1px 6px;margin-left:4px}
+.empty{color:var(--mut);text-align:center;padding:30px 10px}
+.st{font-size:12px;font-weight:600;padding:2px 8px;border-radius:8px;background:var(--line)}
+.st.cooking{background:var(--acc);color:var(--accink)}.st.ready{background:var(--ok);color:#fff}
+input[type=number]{width:70px;font:inherit;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(90px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<nav id="nav"></nav>
+<script>
+const CUR='$';
+const $=c=>CUR+(c/100).toFixed(2);
+async function api(path,opts={}){
+  const r=await fetch('/api'+path,{method:opts.method||'GET',headers:{'Content-Type':'application/json'},body:opts.body?JSON.stringify(opts.body):undefined});
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(data.error||r.statusText);
+  return data;
+}
+let S={tables:[],menu:[],kitchen:[],order:null,report:{count:0,total:0},draft:{},sel:null,tab:'tables',cat:null,split:1};
+function toast(m){const e=document.createElement('div');e.className='toast';e.textContent=m;document.body.appendChild(e);setTimeout(()=>e.remove(),1800)}
+
+async function load(){
+  try{
+    const [tables,kitchen,report]=await Promise.all([api('/tables'),api('/kitchen'),api('/reports/today')]);
+    S.tables=tables;S.kitchen=kitchen;S.report=report;
+    S.order=S.sel?await api(`/tables/${S.sel}/order`):null;
+    render();
+  }catch(e){toast('Cannot reach server')}
+}
+
+function vTables(){
+  let h=`<h1>Tables</h1><p class="sub">Today: ${S.report.count} bills paid, ${$(S.report.total)} collected</p><div class="grid">`;
+  S.tables.forEach(t=>{
+    let k=t.status,l={free:'Free',kitchen:'In kitchen',ready:'Food ready',dining:'Dining'}[k];
+    if(k==='free'&&(S.draft[t.table_no]||[]).length){k='ordering';l='Taking order'}
+    h+=`<button class="card tbl ${k}" data-act="pick" data-t="${t.table_no}"><b>Table ${t.table_no}</b><br><span class="tag">${l}</span>${t.total_cents?`<br>${$(t.total_cents)}`:''}</button>`;
+  });
+  return h+'</div>';
+}
+
+function vOrder(){
+  const t=S.sel;
+  if(!t)return`<h1>Order</h1><div class="empty">Pick a table first.<br><br><button class="btn" data-act="tab" data-v="tables">Choose table</button></div>`;
+  const cats=[...new Set(S.menu.map(m=>m.category))];
+  if(!S.cat)S.cat=cats[0];
+  let h=`<h1>Table ${t}</h1><p class="sub">Tap an item to add it to the order.</p><div class="chips">`+
+    cats.map(c=>`<button class="chip ${c===S.cat?'on':''}" data-act="cat" data-v="${c}">${c}</button>`).join('')+'</div><div class="card">';
+  h+=S.menu.filter(m=>m.category===S.cat).map(m=>`<div class="row"><span class="nm">${m.name}</span><span>${$(m.price_cents)}</span><button class="btn" data-act="add" data-id="${m.id}">Add</button></div>`).join('')+'</div>';
+  const sent=S.order?S.order.items:[],d=S.draft[t]||[];
+  h+='<h2>Current order</h2><div class="card">';
+  h+=(sent.length||d.length)?
+    sent.map(i=>`<div class="row"><span class="nm">${i.name}<br><span class="st ${i.status}">${i.status==='new'?'Sent':i.status}</span></span><b>${i.qty}</b></div>`).join('')+
+    d.map((i,x)=>`<div class="row"><span class="nm">${i.name}<br><span class="tag">Not sent</span></span><span class="q"><button data-act="dec" data-x="${x}" aria-label="Remove one">-</button><b>${i.qty}</b><button data-act="inc" data-x="${x}" aria-label="Add one">+</button></span></div>`).join('')
+    :'<div class="empty">No items yet.</div>';
+  h+='</div>';
+  const n=d.reduce((a,i)=>a+i.qty,0);
+  return h+`<button class="btn full" data-act="send" ${n?'':'disabled'}>Send ${n?n+' item'+(n>1?'s':''):''} to kitchen</button>`;
+}
+
+function vKitchen(){
+  let h='<h1>Kitchen</h1><p class="sub">Move each item along as it is cooked and served.</p>';
+  if(!S.kitchen.length)return h+'<div class="empty">No open tickets.</div>';
+  const next={new:['Start','cooking'],cooking:['Ready','ready'],ready:['Served','served']};
+  return h+'<div class="card">'+S.kitchen.map(i=>`<div class="row"><span class="nm"><b>T${i.table_no}</b> ${i.qty} x ${i.name}<br><span class="st ${i.status}">${i.status==='new'?'New':i.status}</span></span><button class="btn" data-act="adv" data-id="${i.id}" data-n="${next[i.status][1]}">${next[i.status][0]}</button></div>`).join('')+'</div>';
+}
+
+function vBill(){
+  const o=S.order;
+  if(!S.sel||!o)return`<h1>Bill</h1><div class="empty">Pick a table that has an order.<br><br><button class="btn" data-act="tab" data-v="tables">Choose table</button></div>`;
+  const c=o.totals,pend=o.items.some(i=>i.status!=='served');
+  let h=`<h1>Bill: Table ${S.sel}</h1><p class="sub">${pend?'Some items are not served yet.':'All items served.'}</p><div class="card">`;
+  h+=o.items.map(i=>`<div class="row"><span class="nm">${i.qty} x ${i.name}</span><span>${$(i.price_cents*i.qty)}</span></div>`).join('')+'</div>';
+  return h+`<div class="card" style="margin-top:10px">
+<div class="row"><span>Discount %</span><input type="number" min="0" max="100" value="${o.discount_pct}" data-act="disc"></div>
+<div class="row"><span>Split between</span><input type="number" min="1" max="20" value="${S.split}" data-act="split"></div>
+<div class="tot"><span>Subtotal</span><span>${$(c.sub)}</span></div>
+${c.disc?`<div class="tot"><span>Discount</span><span>-${$(c.disc)}</span></div>`:''}
+<div class="tot"><span>Service (${c.svc_pct}%)</span><span>${$(c.svc)}</span></div>
+<div class="tot"><span>Tax (${c.tax_pct}%)</span><span>${$(c.tax)}</span></div>
+<div class="tot big"><span>Total</span><span>${$(c.total)}</span></div>
+${S.split>1?`<div class="tot"><span>Each of ${S.split}</span><span>${$(Math.round(c.total/S.split))}</span></div>`:''}</div>
+<button class="btn full" data-act="pay" data-m="cash">Paid in cash ${$(c.total)}</button>
+<button class="btn alt full" data-act="pay" data-m="card">Paid by card</button>
+<button class="btn alt full" data-act="print">Print receipt</button>`;
+}
+
+function render(){
+  const v={tables:vTables,order:vOrder,kitchen:vKitchen,bill:vBill}[S.tab];
+  const y=window.scrollY;
+  document.getElementById('app').innerHTML=v();
+  const k=S.kitchen.filter(i=>i.status!=='ready').length;
+  document.getElementById('nav').innerHTML=[['tables','Tables'],['order','Order'],['kitchen','Kitchen'+(k?`<span class="badge">${k}</span>`:'')],['bill','Bill']]
+    .map(([id,l])=>`<button class="${S.tab===id?'on':''}" data-act="tab" data-v="${id}">${l}</button>`).join('');
+  window.scrollTo(0,y);
+}
+
+document.addEventListener('click',async e=>{
+  const b=e.target.closest('[data-act]');
+  if(!b||b.tagName==='INPUT')return;
+  const d=b.dataset,a=d.act,t=S.sel;
+  try{
+    if(a==='tab')S.tab=d.v;
+    else if(a==='pick'){S.sel=+d.t;S.split=1;S.draft[S.sel]=S.draft[S.sel]||[];await load();
+      S.tab=S.order&&!S.draft[S.sel].length&&S.order.items.every(i=>i.status==='served')?'bill':'order'}
+    else if(a==='cat')S.cat=d.v;
+    else if(a==='add'){const m=S.menu.find(x=>x.id==d.id),list=S.draft[t];const ex=list.find(i=>i.id===m.id);ex?ex.qty++:list.push({id:m.id,name:m.name,qty:1})}
+    else if(a==='inc')S.draft[t][d.x].qty++;
+    else if(a==='dec'){const i=S.draft[t][d.x];if(--i.qty<1)S.draft[t].splice(d.x,1)}
+    else if(a==='send'){await api(`/tables/${t}/send`,{method:'POST',body:{items:S.draft[t].map(i=>({menu_id:i.id,qty:i.qty}))}});S.draft[t]=[];toast('Sent to kitchen')}
+    else if(a==='adv')await api(`/items/${d.id}`,{method:'PATCH',body:{status:d.n}});
+    else if(a==='pay'){await api(`/orders/${S.order.id}/pay`,{method:'POST',body:{method:d.m}});S.sel=null;S.order=null;S.tab='tables';toast('Payment recorded')}
+    else if(a==='print')window.print();
+    await load();
+  }catch(err){toast(err.message)}
+});
+document.addEventListener('change',async e=>{
+  const a=e.target.dataset.act;
+  try{
+    if(a==='disc')await api(`/orders/${S.order.id}`,{method:'PATCH',body:{discount_pct:+e.target.value||0}});
+    if(a==='split')S.split=Math.max(1,+e.target.value||1);
+    await load();
+  }catch(err){toast(err.message)}
+});
+
+(async()=>{S.menu=await api('/menu').catch(()=>[]);await load();
+  setInterval(()=>{if(document.activeElement.tagName!=='INPUT')load()},4000)})();
+</script>
+</body>
+</html>
